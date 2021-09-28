@@ -237,21 +237,19 @@ __global__ void shadeFakeMaterial (
       glm::vec3 materialColor = material.color;
 
       // If the material indicates that the object was a light, "light" the ray
-      if (material.emittance > 0.0f) {
+      if (material.emittance > 0.0 && pathSegments[idx].remainingBounces) {
         pathSegments[idx].color *= (materialColor * material.emittance);
         pathSegments[idx].remainingBounces = 0;
       }
+
       // Otherwise, do some pseudo-lighting computation. This is actually more
       // like what you would expect from shading in a rasterizer like OpenGL.
       // TODO: replace this! you should be able to start with basically a one-liner
-      else{
+      else if (pathSegments[idx].remainingBounces){
         float lightTerm = glm::dot(intersection.surfaceNormal, pathSegments[idx].ray.direction); //glm::vec3(0.0f, 1.0f, 0.0f));
-        pathSegments[idx].color *= (materialColor * abs(lightTerm)) *0.3f + ((1.0f - intersection.t * 0.02f) * materialColor) * 0.7f;
-        //float3 foo = float3{ pathSegments[idx].color.r, pathSegments[idx].color.g, pathSegments[idx].color.b };
+		pathSegments[idx].color *= materialColor;//(materialColor * abs(lightTerm)) *0.3f + ((1.0f - intersection.t * 0.02f) * materialColor) * 0.7f;
         pathSegments[idx].ray.origin = getPointOnRay(pathSegments[idx].ray, intersection.t);
         pathSegments[idx].ray.direction = calculateRandomDirectionInHemisphere(intersection.surfaceNormal, rng);
-        //glm::normalize(pathSegments[idx].color);
-        //pathSegments[idx].remainingBounces *= foo.x;
         pathSegments[idx].remainingBounces--;
   
         //pathSegments[idx].color *= u01(rng); // apply some noise because why not
@@ -274,7 +272,7 @@ __global__ void finalGather(int nPaths, glm::vec3 * image, PathSegment * iterati
     if (index < nPaths)
     {
         PathSegment iterationPath = iterationPaths[index];
-        image[iterationPath.pixelIndex] = ((image[iterationPath.pixelIndex] * (iterations-1)) + iterationPath.color)/ iterations;// *0.001f;
+		image[iterationPath.pixelIndex] += iterationPath.color;// ((image[iterationPath.pixelIndex] * (iterations - 1)) + iterationPath.color) / iterations;// *0.001f;
     }
 }
 
