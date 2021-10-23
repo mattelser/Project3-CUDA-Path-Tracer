@@ -2,6 +2,10 @@
 #include "preview.h"
 #include <cstring>
 
+#include "../imgui/imgui.h"
+#include "../imgui/imgui_impl_glfw.h"
+#include "../imgui/imgui_impl_opengl3.h"
+
 static std::string startTimeString;
 
 // For camera controls
@@ -10,6 +14,19 @@ static bool rightMousePressed = false;
 static bool middleMousePressed = false;
 static double lastX;
 static double lastY;
+
+// UI parameters
+int ui_iterations = 0;
+int startupIterations = 0;
+int lastLoopIterations = 0;
+bool ui_showGbuffer = false;
+bool ui_denoise = true; // false;
+int ui_filterSize = 80;
+float ui_colorWeight = 0.45f;
+float ui_normalWeight = 0.35f;
+float ui_positionWeight = 0.2f;
+bool ui_saveAndExit = false;
+
 
 static bool camchanged = true;
 static float dtheta = 0, dphi = 0;
@@ -21,6 +38,7 @@ glm::vec3 ogLookAt; // for recentering the camera
 
 Scene *scene;
 RenderState *renderState;
+DenoiseSettings *denoiseSettings;
 int iteration;
 
 int width;
@@ -47,12 +65,26 @@ int main(int argc, char** argv) {
     // Load scene file
     scene = new Scene(sceneFile);
 
+    // Set up denoise settings to pass data from UI
+    denoiseSettings = new DenoiseSettings();
+    denoiseSettings->denoise = &ui_denoise;
+    denoiseSettings->filterSize = &ui_filterSize;
+    denoiseSettings->colorWeight = &ui_colorWeight;
+	denoiseSettings->normalWeight = &ui_normalWeight;
+	denoiseSettings->positionWeight = &ui_positionWeight;
+
+
     // Set up camera stuff from loaded path tracer settings
     iteration = 0;
     renderState = &scene->state;
     Camera &cam = renderState->camera;
     width = cam.resolution.x;
     height = cam.resolution.y;
+    
+    renderState->denoiseSettings = denoiseSettings;
+
+    ui_iterations = renderState->iterations;
+    startupIterations = ui_iterations;
 
     glm::vec3 view = cam.view;
     glm::vec3 up = cam.up;
@@ -125,6 +157,11 @@ void saveImage() {
 }
 
 int runCuda() {
+    if (lastLoopIterations != ui_iterations) {
+      lastLoopIterations = ui_iterations;
+      camchanged = true;
+    }
+
     if (camchanged) {
         iteration = 0;
         Camera &cam = renderState->camera;
@@ -154,12 +191,27 @@ int runCuda() {
     }
 
 	uchar4 *pbo_dptr = NULL;
-	iteration++;
 	cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
 
-	// execute the kernel
-	int frame = 0;
-	int rcode = pathtrace(pbo_dptr, frame, iteration);
+    int rcode = 0;
+
+    if (iteration < ui_iterations) {
+        iteration++;
+
+		// execute the kernel
+		int frame = 0;
+        rcode = pathtrace(pbo_dptr, frame, iteration);
+    }
+
+    if (ui_showGbuffer) {
+      showGBuffer(pbo_dptr);
+    } 
+    else if (ui_denoise) {
+        showDenoise(pbo_dptr, iteration);
+    }
+    else {
+      showImage(pbo_dptr, iteration);
+    }
 
 	// unmap buffer object
 	cudaGLUnmapBufferObject(pbo);
@@ -194,6 +246,7 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 }
 
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
+  if (ImGui::GetIO().WantCaptureMouse) return;
   leftMousePressed = (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS);
   rightMousePressed = (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS);
   middleMousePressed = (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS);

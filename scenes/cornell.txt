@@ -1,7 +1,7 @@
 // Scene settings
 SETTINGS
 SORT_MATERIALS 0
-CACHE_BOUNCE 1
+CACHE_BOUNCE 0
 USE_DOF 0
 ANTIALIAS 0
 USE_BBOX 1
@@ -111,7 +111,7 @@ EMITTANCE   0
 
 // Camera
 CAMERA
-RES         800 600
+RES         800 800
 FOVY        45
 ITERATIONS  5000
 DEPTH       16
@@ -195,13 +195,21 @@ TRANS       -1 0.05 1
 ROTAT       0 10 0
 SCALE       3 .1 .1
 
-// mesh sphere
+//// mesh sphere
+//OBJECT 9
+////C:\Users\elser\class\gpu\pathTracer\Project3-CUDA-Path-Tracer\scenes\sphere.obj
+//material 8
+//TRANS       -3 5 0
+//ROTAT       0 0 0
+//SCALE       1.5 1.5 1.5
+
+// Sphere
 OBJECT 9
-C:\Users\elser\class\gpu\pathTracer\Project3-CUDA-Path-Tracer\scenes\sphere.obj
+sphere
 material 8
 TRANS       -3 5 0
 ROTAT       0 0 0
-SCALE       1.5 1.5 1.5
+SCALE       3 3 3
 
 // Sphere
 OBJECT 10

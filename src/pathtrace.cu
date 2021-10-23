@@ -65,6 +65,20 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution,
     }
 }
 
+__global__ void gbufferToPBO(uchar4* pbo, glm::ivec2 resolution, GBufferPixel* gBuffer) {
+    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+    if (x < resolution.x && y < resolution.y) {
+        int index = x + (y * resolution.x);
+        //float timeToIntersect = gBuffer[index].t * 256.0;
+        pbo[index].w = 0;
+        pbo[index].x = fabs(gBuffer[index].normal.x) * 255.0f;
+        pbo[index].y = fabs(gBuffer[index].normal.y) * 255.0f;
+        pbo[index].z = fabs(gBuffer[index].normal.z) * 255.0f;
+    }
+}
+
 static Scene * hst_scene = NULL;
 static glm::vec3 * dev_image = NULL;
 static Geom * dev_geoms = NULL;
@@ -85,6 +99,10 @@ static int * dev_iterationsPerPixel = NULL;
 // note variance has to be calculated for R, G, & B so we need a vec3
 static glm::vec3 * dev_variancePerPixel = NULL;
 static int numPixelsCulled = 0;
+// denoise related data
+static DenoiseSettings * denoiseSettings = NULL;
+static GBufferPixel* dev_gBuffer = NULL;
+static glm::vec3 * dev_dnImage = NULL;
 
 void pathtraceInit(Scene *scene) {
     hst_scene = scene;
@@ -108,6 +126,12 @@ void pathtraceInit(Scene *scene) {
     cudaMalloc(&dev_intersections2, pixelcount * sizeof(ShadeableIntersection));
     cudaMalloc(&dev_itxnBounce1Cache, pixelcount * sizeof(ShadeableIntersection));
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+    
+    // --- init denoise data ---
+    cudaMalloc(&dev_gBuffer, pixelcount * sizeof(GBufferPixel));
+
+    cudaMalloc(&dev_dnImage, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_dnImage, 0, pixelcount * sizeof(glm::vec3));
 
     // --- init adaptive sampling ---
     cudaMalloc(&dev_iterationsPerPixel, pixelcount * sizeof(int));
@@ -199,6 +223,8 @@ void pathtraceFree() {
     cudaFree(dev_bboxTris);
     cudaFree(dev_iterationsPerPixel);
     cudaFree(dev_variancePerPixel);
+    cudaFree(dev_gBuffer);
+    cudaFree(dev_dnImage); 
 
     checkCUDAError("pathtraceFree");
 }
@@ -489,6 +515,22 @@ __device__ glm::vec3 devClampRGB(glm::vec3 col) {
 //    }
 //}
 
+__global__ void generateGBuffer (
+  int num_paths,
+  ShadeableIntersection* shadeableIntersections,
+	PathSegment* pathSegments,
+  GBufferPixel* gBuffer) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < num_paths)
+  {
+    //gBuffer[idx].t = shadeableIntersections[idx].t;
+    gBuffer[idx].normal = shadeableIntersections[idx].surfaceNormal;
+    gBuffer[idx].position = getPointOnRay(pathSegments[idx].ray, 
+                                          shadeableIntersections[idx].t);
+  }
+}
+
+
 __global__ void finalGatherAndCalcCull(int nPaths, 
 							glm::vec3 * image, 
 							PathSegment * iterationPaths, 
@@ -725,6 +767,97 @@ void shade(int iter,
     checkCUDAError("shade");
 }
 
+__global__ void denoise(int n, 
+						GBufferPixel* gbuff, 
+						glm::vec3* image, 
+						glm::vec3 * dnImage,
+						int step, 
+						int imageWidth,
+						float normalWeight,
+						float posWeight, 
+						float colorWeight)
+{
+	int index = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+    if (index < n)
+    {
+        glm::vec3 colSum = glm::vec3(0.0f);
+        float wSum = 0.0f;
+        // hardcode a 5x5 Gaussian filter
+        float GaussianFilter[5][5] = { {1,  4, 6,  4,  1},
+                                       {4, 16, 24, 16, 4},
+                                       {6, 24, 36, 24, 6},
+                                       {4, 16, 24, 16, 4},
+                                       {1,  4,  6,  4, 1} };
+
+        // a way to convert from 2d pixel space to the 1d pixel array we have
+		int uStepIm = 1;
+		int vStepIm = imageWidth;
+
+        // the relative offset from the center pixel in the image
+        // e.x. -2, -2 is two pixels left and two pixels up in screenspace
+        int imStartX = -2;
+        int imStartY = -2;
+
+
+        // store the gbuffer values for the center pixel of our filter
+        // i.e. the one we're actually calculating the color for
+        glm::vec3 centralNorm = gbuff[index].normal;
+        glm::vec3 centralPos = gbuff[index].position;
+        glm::vec3 centralCol = image[index];
+
+        // the cell count in 2d, starting in the upper left corner of
+        // our 5x5 filter
+            for (int y = 0; y < 5; y++) {
+                for (int x = 0; x < 5; x++) {
+                    int imX = (imStartX + x) * uStepIm * step;
+                    int imY = (imStartY + y) * vStepIm * step;
+
+                    // i is the index for 1d representations of our 2d
+                    // data, i.e. the beauty pass and the gbuffer
+                    int i = index + imX + imY;
+                    if (i < 0 || i >= n) {
+                        // i can be out of bounds along the edges of the image
+                        continue;
+                    }
+
+                    // get the Gaussian value for this pixel
+                    float gVal = GaussianFilter[y][x];
+
+                    // get the gbuffer values for this pixel
+                    glm::vec3 nVal = gbuff[i].normal;
+                    glm::vec3 pVal = gbuff[i].position;
+                    glm::vec3 cVal = image[i];
+
+                    // get the distance of the gbuffer values 
+                    // from our central pixel
+					//glm::vec3 a = centralCol - cVal;
+                    float nDist = max(glm::length(centralNorm - nVal)/(step*step), 0.0f);
+					float pDist = glm::length(centralPos - pVal);// , centralPos - pVal);
+					float cDist = glm::length(centralCol - cVal);// , centralCol - cVal);
+
+                    // get the weights based on these distances
+                    // and our input values
+                    float nw = min(exp(-1.0f * nDist / normalWeight), 1.0f);
+                    float pw = min(exp(-1.0f * pDist / posWeight), 1.0f);
+					float cw = min(exp(-1.0f * cDist / colorWeight), 1.0f);
+
+                    // get the overall 
+                    float w = nw * pw * cw;
+
+                    colSum += cVal * w * gVal;
+                    wSum += w * gVal;
+                }
+            }
+
+        //bring denoise
+        volatile float3 foo = make_float3(colSum.x, colSum.y, colSum.z);
+        volatile float3 bar = make_float3(centralCol.x, centralCol.y, centralCol.z);
+        dnImage[index] = colSum / wSum;
+        //dnImage[index] = colSum / (256.0f * steps);
+    }
+}
+
 /**
 * Wrapper for the __global__ call that sets up the kernel calls and does a ton
 * of memory management
@@ -833,6 +966,9 @@ int pathtrace(uchar4 *pbo, int frame, int iter) {
                                                                             dev_meshEndIndices,
                                                                             dev_bboxTris,
                                                                             hst_scene->state.useBBox);
+		if (depth == 0 && iter == 1) {
+		    generateGBuffer<<<numblocksPathSegmentTracing, blockSize1d>>>(num_paths, dev_intersections, dev_paths, dev_gBuffer);
+		}
 		depth++;
 
 
@@ -911,6 +1047,25 @@ int pathtrace(uchar4 *pbo, int frame, int iter) {
     // reset num_paths. We've culled some but want the full number next iteration
     //num_paths = preBounceCullNumPaths;
     ///////////////////////////////////////////////////////////////////////////
+    if (*hst_scene->state.denoiseSettings->denoise){
+
+        float nWeight = pow(*hst_scene->state.denoiseSettings->normalWeight, 2);
+        float pWeight = pow(*hst_scene->state.denoiseSettings->positionWeight, 2);
+        float cWeight = pow(*hst_scene->state.denoiseSettings->colorWeight, 2);
+
+        int steps = *hst_scene->state.denoiseSettings->filterSize / 5;
+        for (int step = 1; step <= steps; step++) {
+			denoise <<<numBlocksPixels, blockSize1d>>>(preBounceCullNumPaths, 
+													   dev_gBuffer, 
+													   dev_image, 
+													   dev_dnImage, 
+													   step, 
+													   cam.resolution.x,
+													   nWeight, 
+													   pWeight,
+													   cWeight);
+        }
+    }
 
     // Send results to OpenGL buffer for rendering
     sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, dev_iterationsPerPixel, dev_image);
@@ -946,4 +1101,37 @@ int pathtrace(uchar4 *pbo, int frame, int iter) {
 
     checkCUDAError("pathtrace");
     return 0;
+}
+
+void showGBuffer(uchar4* pbo) {
+    const Camera &cam = hst_scene->state.camera;
+    const dim3 blockSize2d(8, 8);
+    const dim3 blocksPerGrid2d(
+            (cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+            (cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+
+    // CHECKITOUT: process the gbuffer results and send them to OpenGL buffer for visualization
+    gbufferToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, dev_gBuffer);
+}
+
+void showDenoise(uchar4* pbo, int iter) {
+    const Camera &cam = hst_scene->state.camera;
+    const dim3 blockSize2d(8, 8);
+    const dim3 blocksPerGrid2d(
+            (cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+            (cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+
+    // CHECKITOUT: process the gbuffer results and send them to OpenGL buffer for visualization
+    sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, dev_iterationsPerPixel, dev_dnImage);
+}
+
+void showImage(uchar4* pbo, int iter) {
+const Camera &cam = hst_scene->state.camera;
+    const dim3 blockSize2d(8, 8);
+    const dim3 blocksPerGrid2d(
+            (cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+            (cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+
+    // Send results to OpenGL buffer for rendering
+    sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, dev_iterationsPerPixel, dev_image);
 }

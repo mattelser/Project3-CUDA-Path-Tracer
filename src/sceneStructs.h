@@ -70,6 +70,14 @@ struct Camera {
     float lensRadius;
 };
 
+struct DenoiseSettings {
+	bool * denoise;
+	int * filterSize;
+	float * colorWeight;
+	float * normalWeight;
+	float * positionWeight;
+};
+
 struct RenderState {
     Camera camera;
     unsigned int iterations;
@@ -77,6 +85,7 @@ struct RenderState {
     std::vector<glm::vec3> image;
     std::vector<int> heatMap;
     std::string imageName;
+    DenoiseSettings *denoiseSettings;
     bool sortMaterials = false;
     bool cacheFirstBounce = false;
     bool useDOF = false;
@@ -102,4 +111,10 @@ struct ShadeableIntersection {
   float t;
   glm::vec3 surfaceNormal;
   int materialId;
+};
+
+struct GBufferPixel {
+  //float t;
+  glm::vec3 normal;
+  glm::vec3 position;
 };
