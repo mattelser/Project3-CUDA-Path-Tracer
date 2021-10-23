@@ -20,11 +20,12 @@ int ui_iterations = 0;
 int startupIterations = 0;
 int lastLoopIterations = 0;
 bool ui_showGbuffer = false;
+bool ui_GbufferIsNorm = false;
 bool ui_denoise = true; // false;
-int ui_filterSize = 80;
-float ui_colorWeight = 0.45f;
-float ui_normalWeight = 0.35f;
-float ui_positionWeight = 0.2f;
+int ui_filterSize = 15;
+float ui_colorWeight = 10.0f;
+float ui_normalWeight = 1.75f;
+float ui_positionWeight = 1.75f;
 bool ui_saveAndExit = false;
 
 
@@ -132,6 +133,29 @@ void saveHeatmap() {
     img.savePNG(filename);
 }
 
+void saveDenoise() {
+    float samples = iteration;
+    // output image file
+    image img(width, height);
+
+    for (int x = 0; x < width; x++) {
+        for (int y = 0; y < height; y++) {
+            int index = x + (y * width);
+            glm::vec3 pix = renderState->imageDenoise[index];
+            img.setPixel(width - 1 - x, y, glm::vec3(pix) / samples);
+        }
+    }
+
+    std::string filename = renderState->imageName + "Denoise";
+    std::ostringstream ss;
+    ss << filename << "." << startTimeString << "." << samples << "samp";
+    filename = ss.str();
+
+    img.savePNG(filename);
+
+    // also save a heatmap of iterations per pixel
+}
+
 void saveImage() {
     float samples = iteration;
     // output image file
@@ -153,7 +177,9 @@ void saveImage() {
     img.savePNG(filename);
 
     // also save a heatmap of iterations per pixel
-    saveHeatmap();
+    //saveHeatmap();
+    // save a denoised version of the image
+    saveDenoise();
 }
 
 int runCuda() {
@@ -204,7 +230,7 @@ int runCuda() {
     }
 
     if (ui_showGbuffer) {
-      showGBuffer(pbo_dptr);
+      showGBuffer(pbo_dptr, ui_GbufferIsNorm);
     } 
     else if (ui_denoise) {
         showDenoise(pbo_dptr, iteration);

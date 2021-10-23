@@ -299,6 +299,7 @@ int Scene::loadCamera() {
     //set up render camera stuff
     int arraylen = camera.resolution.x * camera.resolution.y;
     state.image.resize(arraylen);
+    state.imageDenoise.resize(arraylen);
     state.heatMap.resize(arraylen);
     std::fill(state.image.begin(), state.image.end(), glm::vec3());
 
