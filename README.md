@@ -8,7 +8,7 @@ CUDA Path Tracer
 * Tested on: Tested on: Windows 10, i3-10100F @ 3.6GHz 16GB, GeForce 1660 Super 6GB
 
 ### Features
-![Stanford tryranosaurus](img/trex.png)
+![Stanford tryranosaurus](img/trex_glass_denoise.png)
 ![DOF example](img/DOF.png)
 
 This is a GPU based forward path tracer, which renders scenes by calculating "camera rays" bouncing around the scene,

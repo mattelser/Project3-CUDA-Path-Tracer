@@ -1083,7 +1083,7 @@ int pathtrace(uchar4 *pbo, int frame, int iter) {
 	checkCUDAError("copying heatmap");
     cudaMemcpy(hst_scene->state.imageDenoise.data(), dev_dnImage,
             pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
-	checkCUDAError("copying heatmap");
+	checkCUDAError("copying denoise");
 
     // cull pixels for the next iteration
     if (hst_scene->state.useAdaptiveSampling && iter > hst_scene->state.minSamples) {

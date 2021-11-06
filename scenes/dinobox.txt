@@ -88,12 +88,12 @@ EMITTANCE   0
 
 // dino
 MATERIAL 7
-RGB         1 .9 1
+RGB         0.9 0.7 0.9
 SPECEX      0
 SPECRGB     .98 .7 .98
 REFL        1
 REFR        1
-REFRIOR     1.3
+REFRIOR     1.5
 FRESNELPOW  3
 EMITTANCE   0
 

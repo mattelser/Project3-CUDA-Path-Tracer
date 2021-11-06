@@ -22,9 +22,9 @@ int lastLoopIterations = 0;
 bool ui_showGbuffer = false;
 bool ui_GbufferIsNorm = false;
 bool ui_denoise = true; // false;
-int ui_filterSize = 15;
-float ui_colorWeight = 10.0f;
-float ui_normalWeight = 1.75f;
+int ui_filterSize = 14;
+float ui_colorWeight = 20.0f;
+float ui_normalWeight = 2.0f;
 float ui_positionWeight = 1.75f;
 bool ui_saveAndExit = false;
 
@@ -241,7 +241,7 @@ int runCuda() {
 
 	// unmap buffer object
 	cudaGLUnmapBufferObject(pbo);
-    
+
     if (iteration >= renderState->iterations || rcode) {
         saveImage();
         pathtraceFree();
